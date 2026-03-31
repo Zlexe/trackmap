@@ -1,0 +1,367 @@
+/* Убираем ограничения для корневого контейнера */
+.railway-map {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Контейнер карты занимает все свободное место */
+.railway-map__container {
+  flex: 1;
+  width: 100%;
+  background: #eef2f5;
+  min-height: 0; /* Важно для flex-контейнера */
+}
+
+
+.railway-map {
+  position: relative;
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.railway-map__header {
+  background: linear-gradient(135deg, #1e3c5c 0%, #0f2c44 100%);
+  color: white;
+  padding: 8px 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.railway-map__title {
+  font-size: 1.2rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.railway-map__controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.railway-map__file-label {
+  background: #2c5270;
+  padding: 4px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.railway-map__file-label:hover {
+  background: #3e6a8c;
+  transform: translateY(-1px);
+}
+
+.railway-map__file-label input {
+  display: none;
+}
+
+.railway-map__layer-switcher {
+  background: #2c5270;
+  padding: 4px 12px;
+  border-radius: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+
+.railway-map__layer-switcher button {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  margin: 0;
+}
+
+.railway-map__layer-switcher button:hover {
+  background: #ff7b2c;
+}
+
+.railway-map__legend {
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  display: flex;
+  gap: 16px;
+}
+
+.railway-map__legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.railway-map__line-color {
+  width: 24px;
+  height: 3px;
+  display: inline-block;
+}
+
+.railway-map__station-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid white;
+  display: inline-block;
+}
+
+.railway-map__container {
+  flex: 1;
+  width: 100%;
+  background: #eef2f5;
+}
+
+.railway-map__filter-panel {
+  position: absolute;
+  top: 80px;
+  right: 10px;
+  width: 320px;
+  background: rgba(30, 30, 40, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  padding: 12px;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: white;
+  font-size: 12px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+}
+
+.railway-map__filter-panel h3 {
+  font-size: 14px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  padding-bottom: 6px;
+}
+
+.railway-map__filter-section {
+  margin-bottom: 16px;
+}
+
+.railway-map__filter-section h4 {
+  font-size: 12px;
+  margin-bottom: 6px;
+  color: #ffaa66;
+}
+
+.railway-map__filter-buttons {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.railway-map__filter-buttons button {
+  background: #2c5270;
+  border: none;
+  padding: 2px 8px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 10px;
+  color: white;
+}
+
+.railway-map__filter-buttons button:hover {
+  background: #ff7b2c;
+}
+
+.railway-map__filter-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 4px;
+}
+
+.railway-map__filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.railway-map__filter-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.railway-map__filter-item input {
+  cursor: pointer;
+}
+
+.railway-map__filter-item label {
+  cursor: pointer;
+  flex: 1;
+}
+
+.railway-map__color-badge {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.railway-map__station-search {
+  width: 100%;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  border-radius: 4px;
+  border: none;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.railway-map__checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.railway-map__status-panel {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #ffaa00;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  z-index: 1000;
+  font-family: monospace;
+  max-width: 350px;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+.railway-map__status-panel--success {
+  color: #4caf50;
+}
+
+.railway-map__status-panel--error {
+  color: #ff5252;
+}
+
+.railway-map__stats {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #ccc;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-family: monospace;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+.railway-map button {
+  background: #ff7b2c;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: white;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.railway-map button:hover {
+  background: #ff944d;
+  transform: translateY(-1px);
+}
+
+.railway-map__action-button {
+  background: #4caf50;
+}
+
+.railway-map__action-button:hover {
+  background: #45a049;
+}
+
+.railway-map__close-filter {
+  float: right;
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: white;
+  font-size: 16px;
+  padding: 0;
+}
+
+.railway-map__progress-bar {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  width: 250px;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 10px;
+  padding: 5px;
+  z-index: 1000;
+}
+
+.railway-map__progress-fill {
+  height: 4px;
+  background: #ff7b2c;
+  border-radius: 5px;
+  width: 0%;
+  transition: width 0.3s;
+}
+
+@media (max-width: 600px) {
+  .railway-map__filter-panel {
+    width: 280px;
+    top: 70px;
+    right: 5px;
+  }
+  .railway-map__title {
+    font-size: 0.9rem;
+  }
+  .railway-map__legend {
+    font-size: 0.65rem;
+    gap: 8px;
+  }
+  .railway-map__controls {
+    gap: 4px;
+  }
+  .railway-map__layer-switcher {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+  }
+}
