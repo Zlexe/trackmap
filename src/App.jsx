@@ -1,51 +1,102 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
 import MapPage from './pages/MapPage';
-import KPIPage from './pages/KPIPage';
-import ParetoPage from './pages/ParetoPage';
-import TimeSeriesPage from './pages/TimeSeriesPage';
-import DevicesPage from './pages/DevicesPage';
-import FailuresPage from './pages/FailuresPage';
 import './App.css';
+import { Lens } from './pages/Lens';
+
+// Компонент для подсветки активной ссылки
+const MenuItem = ({ to, icon, name, onClick }) => {
+  const location = useLocation();
+  const isActive = location.pathname === to || (to === '/' && location.pathname === '/lens');
+  
+  return (
+    <li>
+      <Link to={to} className={isActive ? 'active' : ''} onClick={onClick}>
+        <span className="icon">{icon}</span>
+        <span>{name}</span>
+      </Link>
+    </li>
+  );
+};
 
 function App() {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  
   const menuItems = [
-    { path: '/', name: 'Ключевые показатели (KPI)', icon: '📊' },
-    { path: '/pareto', name: 'Парето-анализ', icon: '📈' },
-    { path: '/timeseries', name: 'Временные ряды', icon: '📅' },
-    { path: '/devices', name: 'Детализация по устройствам', icon: '🔧' },
-    { path: '/failures', name: 'Причины отказов', icon: '⚠️' },
+    { path: '/', name: 'Дашборд', icon: '📊' },
     { path: '/map', name: 'Карта', icon: '🗺️' }
   ];
+
+  // Закрываем меню при изменении размера окна
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth > 768 && isMobileMenuOpen) {
+        setIsMobileMenuOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isMobileMenuOpen]);
+
+  // Блокируем скролл body при открытом мобильном меню
+  useEffect(() => {
+    if (isMobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isMobileMenuOpen]);
+
+  const closeMenu = () => {
+    if (isMobileMenuOpen) setIsMobileMenuOpen(false);
+  };
 
   return (
     <BrowserRouter>
       <div className="app">
-        <nav className="sidebar">
+        {/* Кнопка для мобильного меню */}
+        <button 
+          className="mobile-menu-btn"
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          aria-label="Меню"
+        >
+          ☰
+        </button>
+        
+        <nav className={`sidebar ${isMobileMenuOpen ? 'open' : ''}`}>
           <div className="logo">
             <h2>🚂 ЗСЖД</h2>
             <p>Мониторинг</p>
           </div>
           <ul>
             {menuItems.map((item) => (
-              <li key={item.path}>
-                <Link to={item.path}>
-                  <span className="icon">{item.icon}</span>
-                  <span>{item.name}</span>
-                </Link>
-              </li>
+              <MenuItem 
+                key={item.path}
+                to={item.path} 
+                icon={item.icon} 
+                name={item.name}
+                onClick={closeMenu}
+              />
             ))}
           </ul>
         </nav>
         
-        <main className="content">
+        {/* Оверлей для мобильного меню */}
+        {isMobileMenuOpen && (
+          <div 
+            className="mobile-overlay"
+            onClick={closeMenu}
+          />
+        )}
+        
+        <main className="content" onClick={closeMenu}>
           <Routes>
-            <Route path="/" element={<KPIPage />} />
-            <Route path="/pareto" element={<ParetoPage />} />
-            <Route path="/timeseries" element={<TimeSeriesPage />} />
-            <Route path="/devices" element={<DevicesPage />} />
-            <Route path="/failures" element={<FailuresPage />} />
+            <Route path="/" element={<Lens />} />
             <Route path="/map" element={<MapPage />} />
+            <Route path="/lens" element={<Lens />} />
           </Routes>
         </main>
       </div>

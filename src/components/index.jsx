@@ -15,6 +15,10 @@ const colorPalette = [
   '#f5cd79', '#ea868f', '#596275', '#f7b731', '#786fa6', '#f3a683'
 ];
 
+// Глобальные флаги для отслеживания загрузки Yandex Maps API
+let isYandexMapsLoading = false;
+let isYandexMapsLoaded = false;
+
 const RailwayMap = () => {
   const [map, setMap] = useState(null);
   const [currentMapType, setCurrentMapType] = useState('scheme');
@@ -40,6 +44,7 @@ const RailwayMap = () => {
   const csvLineObjects = useRef([]);
   const geojsonLineObjects = useRef([]);
   const autoLineObjects = useRef([]);
+  const mapInitialized = useRef(false);
 
   const isPointInRegion = useCallback((lat, lng) => {
     return lat >= REGION_BOUNDS.minLat && lat <= REGION_BOUNDS.maxLat &&
@@ -299,46 +304,124 @@ const RailwayMap = () => {
     applyFilters();
   }, [applyFilters, allStations, csvLines, geojsonLines, autoLines, selectedShch, selectedStations, showCsvLinesFlag, showGeojsonFlag, showAutoLinesFlag]);
 
-  // Инициализация карты
+  // ИСПРАВЛЕННАЯ инициализация карты с защитой от повторной загрузки
   useEffect(() => {
+    // Предотвращаем повторную инициализацию
+    if (mapInitialized.current) return;
+    
+    let isMounted = true;
+    let checkInterval = null;
+
     const initMap = () => {
-      if (!window.ymaps) return;
+      if (!isMounted) return;
+      if (mapInitialized.current) return;
       
-      window.ymaps.ready(() => {
-        const mapElement = document.getElementById('map');
-        if (!mapElement) {
-          console.error('Элемент map не найден');
-          return;
-        }
-        
-        const newMap = new window.ymaps.Map('map', {
-          center: [(REGION_BOUNDS.minLat + REGION_BOUNDS.maxLat) / 2, 
-                   (REGION_BOUNDS.minLng + REGION_BOUNDS.maxLng) / 2],
-          zoom: 6,
-          controls: ['zoomControl', 'fullscreenControl', 'geolocationControl']
+      const mapElement = document.getElementById('map');
+      if (!mapElement) {
+        console.error('Элемент map не найден');
+        return;
+      }
+      
+      // Проверяем, не создана ли уже карта в этом элементе
+      if (mapElement.children.length > 0 && mapElement.querySelector('ymaps')) {
+        console.log('Карта уже инициализирована в этом элементе');
+        mapInitialized.current = true;
+        return;
+      }
+      
+      try {
+        window.ymaps.ready(() => {
+          if (!isMounted || mapInitialized.current) return;
+          
+          const newMap = new window.ymaps.Map('map', {
+            center: [(REGION_BOUNDS.minLat + REGION_BOUNDS.maxLat) / 2, 
+                     (REGION_BOUNDS.minLng + REGION_BOUNDS.maxLng) / 2],
+            zoom: 6,
+            controls: ['zoomControl', 'fullscreenControl', 'geolocationControl']
+          });
+          
+          const bounds = [
+            [REGION_BOUNDS.minLat, REGION_BOUNDS.minLng],
+            [REGION_BOUNDS.maxLat, REGION_BOUNDS.maxLng]
+          ];
+          newMap.setBounds(bounds, { checkZoomRange: true });
+          newMap.setType('yandex#map');
+          
+          setMap(newMap);
+          mapInitialized.current = true;
         });
-        
-        const bounds = [
-          [REGION_BOUNDS.minLat, REGION_BOUNDS.minLng],
-          [REGION_BOUNDS.maxLat, REGION_BOUNDS.maxLng]
-        ];
-        newMap.setBounds(bounds, { checkZoomRange: true });
-        newMap.setType('yandex#map');
-        
-        setMap(newMap);
-      });
+      } catch (err) {
+        console.error('Ошибка при создании карты:', err);
+      }
     };
 
-    if (window.ymaps) {
-      initMap();
-    } else {
+    const loadYandexMaps = () => {
+      // Если API уже загружен и готов
+      if (window.ymaps && window.ymaps.Map && window.ymaps.ready) {
+        initMap();
+        return;
+      }
+      
+      // Если API уже загружается, ждем
+      if (isYandexMapsLoading) {
+        checkInterval = setInterval(() => {
+          if (window.ymaps && window.ymaps.Map && window.ymaps.ready) {
+            if (checkInterval) clearInterval(checkInterval);
+            initMap();
+          }
+        }, 200);
+        
+        // Таймаут на случай ошибки
+        setTimeout(() => {
+          if (checkInterval) {
+            clearInterval(checkInterval);
+            console.error('Таймаут загрузки Yandex Maps API');
+          }
+        }, 15000);
+        
+        return;
+      }
+      
+      // Проверяем, не добавлен ли уже скрипт
+      const existingScript = document.querySelector('script[src*="api-maps.yandex.ru"]');
+      if (existingScript) {
+        isYandexMapsLoading = true;
+        existingScript.addEventListener('load', () => {
+          isYandexMapsLoading = false;
+          isYandexMapsLoaded = true;
+          initMap();
+        });
+        return;
+      }
+      
+      // Загружаем API
+      isYandexMapsLoading = true;
       const script = document.createElement('script');
       script.src = 'https://api-maps.yandex.ru/2.1/?apikey=d07e771d-d1d0-4fef-bce2-cddd2f2dd789&lang=ru_RU';
       script.async = true;
-      script.onload = initMap;
+      script.onload = () => {
+        isYandexMapsLoading = false;
+        isYandexMapsLoaded = true;
+        if (window.ymaps) {
+          initMap();
+        }
+      };
+      script.onerror = () => {
+        isYandexMapsLoading = false;
+        console.error('Ошибка загрузки Yandex Maps API');
+        showStatus('❌ Ошибка загрузки карты. Проверьте интернет-соединение и API ключ.', true);
+      };
       document.head.appendChild(script);
-    }
-  }, []);
+    };
+
+    loadYandexMaps();
+
+    // Очистка при размонтировании
+    return () => {
+      isMounted = false;
+      if (checkInterval) clearInterval(checkInterval);
+    };
+  }, [showStatus]); // Добавили showStatus в зависимости
 
   const switchMapLayer = (type) => {
     if (!map) return;
