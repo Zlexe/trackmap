@@ -44,12 +44,10 @@ const RailwayMap = () => {
   const [currentMapType, setCurrentMapType] = useState('scheme');
   
   const [allStations, setAllStations] = useState([]);
-  const [csvLines, setCsvLines] = useState([]);
   const [geojsonLines, setGeojsonLines] = useState([]);
-  const [autoLines, setAutoLines] = useState([]);
   
   const [failuresData, setFailuresData] = useState([]);
-  const [selectedDates, setSelectedDates] = useState([]);
+  const [selectedDate, setSelectedDate] = useState(null);
   const [dateRange, setDateRange] = useState({ start: null, end: null });
   const [filterMode, setFilterMode] = useState('single');
   const [filteredFailures, setFilteredFailures] = useState([]);
@@ -65,14 +63,11 @@ const RailwayMap = () => {
   
   const [selectedShch, setSelectedShch] = useState(new Set());
   const [selectedStations, setSelectedStations] = useState(new Set());
-  const [showCsvLinesFlag, setShowCsvLinesFlag] = useState(true);
   const [showGeojsonFlag, setShowGeojsonFlag] = useState(true);
-  const [showAutoLinesFlag, setShowAutoLinesFlag] = useState(true);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [stationSearch, setStationSearch] = useState('');
   const [status, setStatus] = useState({ message: '📁 Загрузите файлы для отображения данных', isError: false });
   const [progress, setProgress] = useState({ show: false, percent: 0 });
-  const [isProcessing, setIsProcessing] = useState(false);
   
   const [selectedStationDetails, setSelectedStationDetails] = useState(null);
   const [stationFailuresHistory, setStationFailuresHistory] = useState([]);
@@ -81,11 +76,10 @@ const RailwayMap = () => {
   const colorIndex = useRef(0);
   
   const stationPlacemarks = useRef([]);
-  const csvLineObjects = useRef([]);
   const geojsonLineObjects = useRef([]);
-  const autoLineObjects = useRef([]);
   const failurePlacemarks = useRef([]);
   
+  const isMapReady = useRef(false);
   const mapInitialized = useRef(false);
 
   const isPointInRegion = useCallback((lat, lng) => {
@@ -141,6 +135,28 @@ const RailwayMap = () => {
 
   const showProgress = useCallback((show, percent = 0) => {
     setProgress({ show, percent });
+  }, []);
+
+  // Функция для форматирования даты в строку для сравнения
+  const formatDateToCompare = useCallback((date) => {
+    if (!date) return null;
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  }, []);
+
+  // Функция для парсинса даты из CSV
+  const parseDateFromCSV = useCallback((dateStr) => {
+    if (!dateStr) return null;
+    const datePart = String(dateStr).split(' ')[0];
+    const match = datePart.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+    if (match) {
+      return {
+        year: parseInt(match[3], 10),
+        month: parseInt(match[2], 10),
+        day: parseInt(match[1], 10),
+        dateStr: datePart
+      };
+    }
+    return null;
   }, []);
 
   const pointToSegmentDistance = (px, py, x1, y1, x2, y2) => {
@@ -223,9 +239,10 @@ const RailwayMap = () => {
     });
     
     const sortedFailures = [...stationFailures].sort((a, b) => {
-      const dateA = new Date(a.date.split('.').reverse().join('-'));
-      const dateB = new Date(b.date.split('.').reverse().join('-'));
-      return dateB - dateA;
+      if (!a.parsedDate || !b.parsedDate) return 0;
+      return b.parsedDate.year - a.parsedDate.year || 
+             b.parsedDate.month - a.parsedDate.month || 
+             b.parsedDate.day - a.parsedDate.day;
     });
     
     setStationFailuresHistory(sortedFailures);
@@ -246,33 +263,40 @@ const RailwayMap = () => {
     };
   }, [showStationDetails]);
 
-  const clearAllObjects = useCallback(() => {
+  const clearStations = useCallback(() => {
     if (!map) return;
-    stationPlacemarks.current.forEach(p => map.geoObjects.remove(p));
-    csvLineObjects.current.forEach(l => map.geoObjects.remove(l));
-    geojsonLineObjects.current.forEach(l => map.geoObjects.remove(l));
-    autoLineObjects.current.forEach(l => map.geoObjects.remove(l));
-    failurePlacemarks.current.forEach(p => map.geoObjects.remove(p));
-    
-    stationPlacemarks.current = [];
-    csvLineObjects.current = [];
-    geojsonLineObjects.current = [];
-    autoLineObjects.current = [];
-    failurePlacemarks.current = [];
+    if (stationPlacemarks.current.length > 0) {
+      stationPlacemarks.current.forEach(p => map.geoObjects.remove(p));
+      stationPlacemarks.current = [];
+    }
   }, [map]);
 
-  const renderRailways = useCallback(() => {
+  const clearGeojsonLines = useCallback(() => {
     if (!map) return;
+    if (geojsonLineObjects.current.length > 0) {
+      geojsonLineObjects.current.forEach(l => map.geoObjects.remove(l));
+      geojsonLineObjects.current = [];
+    }
+  }, [map]);
+
+  const clearFailures = useCallback(() => {
+    if (!map) return;
+    if (failurePlacemarks.current.length > 0) {
+      failurePlacemarks.current.forEach(p => map.geoObjects.remove(p));
+      failurePlacemarks.current = [];
+    }
+  }, [map]);
+
+  const renderStations = useCallback(() => {
+    if (!map || allStations.length === 0) return;
     
-    clearAllObjects();
+    clearStations();
 
     const filteredStations = allStations.filter(station => {
       if (selectedShch.size > 0 && !selectedShch.has(station.shch)) return false;
       if (selectedStations.size > 0 && !selectedStations.has(station.name)) return false;
       return true;
     });
-
-    console.log('Отрисовка станций:', filteredStations.length);
     
     filteredStations.forEach(station => {
       const color = getColorForShch(station.shch);
@@ -299,85 +323,50 @@ const RailwayMap = () => {
       map.geoObjects.add(placemark);
       stationPlacemarks.current.push(placemark);
     });
+  }, [map, allStations, selectedShch, selectedStations, getColorForShch, clearStations]);
 
-    if (showCsvLinesFlag) {
-      console.log('Отрисовка CSV линий:', csvLines.length);
-      csvLines.forEach(line => {
-        if (selectedShch.size === 0 || selectedShch.has(line.shch)) {
-          const polyline = new window.ymaps.Polyline(line.points, {
-            balloonContent: `<b>Линия: ${line.id}</b><br>Участок: ${line.shch}`
-          }, {
-            strokeColor: line.color,
-            strokeWidth: 3,
-            strokeOpacity: 0.8
-          });
-          map.geoObjects.add(polyline);
-          csvLineObjects.current.push(polyline);
+  const renderGeojsonLines = useCallback(() => {
+    if (!map || geojsonLines.length === 0 || !showGeojsonFlag) return;
+    
+    clearGeojsonLines();
+    
+    const segmentCounts = calculateSegmentFailures();
+    const maxCount = Math.max(...Array.from(segmentCounts.values()), 1);
+    
+    geojsonLines.forEach((line, lineIdx) => {
+      if (selectedShch.size === 0 || selectedShch.has(line.shch)) {
+        let lineFailureCount = 0;
+        for (let i = 0; i < line.points.length - 1; i++) {
+          lineFailureCount += segmentCounts.get(`${lineIdx}_${i}`) || 0;
         }
-      });
-    }
-
-    if (showGeojsonFlag && geojsonLines.length > 0) {
-      console.log('Отрисовка GeoJSON линий с тепловой картой:', geojsonLines.length);
-      
-      const segmentCounts = calculateSegmentFailures();
-      const maxCount = Math.max(...Array.from(segmentCounts.values()), 1);
-      
-      geojsonLines.forEach((line, lineIdx) => {
-        if (selectedShch.size === 0 || selectedShch.has(line.shch)) {
-          let lineFailureCount = 0;
-          for (let i = 0; i < line.points.length - 1; i++) {
-            lineFailureCount += segmentCounts.get(`${lineIdx}_${i}`) || 0;
-          }
-          
-          const lineColor = getSegmentColor(lineFailureCount, maxCount);
-          
-          const polyline = new window.ymaps.Polyline(line.points, {
-            balloonContent: `
-              <b>GeoJSON линия</b><br>
-              Участок: ${line.shch}<br>
-              <span style="color: ${lineColor}">●</span> Количество отказов: ${lineFailureCount}
-            `,
-            hintContent: `Отказов на линии: ${lineFailureCount}`
-          }, {
-            strokeColor: lineColor,
-            strokeWidth: 3,
-            strokeOpacity: 0.8
-          });
-          
-          map.geoObjects.add(polyline);
-          geojsonLineObjects.current.push(polyline);
-        }
-      });
-    }
-
-    if (showAutoLinesFlag) {
-      autoLines.forEach(line => {
-        if (selectedShch.size === 0 || selectedShch.has(line.shch)) {
-          const polyline = new window.ymaps.Polyline(line.points, {
-            balloonContent: `<b>Авто-линия</b><br>Участок: ${line.shch}`
-          }, {
-            strokeColor: '#00ff88',
-            strokeWidth: 2,
-            strokeOpacity: 0.6,
-            strokeStyle: 'shortDash'
-          });
-          map.geoObjects.add(polyline);
-          autoLineObjects.current.push(polyline);
-        }
-      });
-    }
-  }, [map, allStations, selectedShch, selectedStations, showCsvLinesFlag, showGeojsonFlag, showAutoLinesFlag, csvLines, geojsonLines, autoLines, getColorForShch, clearAllObjects, calculateSegmentFailures]);
+        
+        const lineColor = getSegmentColor(lineFailureCount, maxCount);
+        
+        const polyline = new window.ymaps.Polyline(line.points, {
+          balloonContent: `
+            <b>GeoJSON линия</b><br>
+            Участок: ${line.shch}<br>
+            <span style="color: ${lineColor}">●</span> Количество отказов: ${lineFailureCount}
+          `,
+          hintContent: `Отказов на линии: ${lineFailureCount}`
+        }, {
+          strokeColor: lineColor,
+          strokeWidth: 3,
+          strokeOpacity: 0.8
+        });
+        
+        map.geoObjects.add(polyline);
+        geojsonLineObjects.current.push(polyline);
+      }
+    });
+  }, [map, geojsonLines, showGeojsonFlag, selectedShch, calculateSegmentFailures, clearGeojsonLines]);
 
   const renderFailures = useCallback(() => {
     if (!map) return;
     
-    failurePlacemarks.current.forEach(p => map.geoObjects.remove(p));
-    failurePlacemarks.current = [];
+    clearFailures();
     
-    if (!filteredFailures.length) return;
-    
-    console.log('Отрисовка отказов:', filteredFailures.length);
+    if (filteredFailures.length === 0) return;
     
     const failuresByStation = new Map();
     
@@ -431,7 +420,7 @@ const RailwayMap = () => {
               <div style="margin-top: 10px; max-height: 300px; overflow-y: auto;">
                 ${failures.slice(0, 50).map(f => `
                   <div style="margin-bottom: 10px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px; border-left: 3px solid ${riskColors[getRiskLevel(f.device)]};">
-                    <div><b>📅 Дата:</b> ${f.date}</div>
+                    <div><b>📅 Дата:</b> ${f.originalDateStr || f.dateStr}</div>
                     <div><b>📝 Устройство:</b> ${f.device || 'Не указано'}</div>
                     ${f.department ? `<div><b>🏢 Отдел:</b> ${f.department}</div>` : ''}
                     ${f.duration ? `<div><b>⏱️ Длительность:</b> ${f.duration} час.</div>` : ''}
@@ -464,8 +453,9 @@ const RailwayMap = () => {
       map.geoObjects.add(placemark);
       failurePlacemarks.current.push(placemark);
     });
-  }, [map, filteredFailures, allStations, getRiskLevel]);
+  }, [map, filteredFailures, allStations, getRiskLevel, clearFailures]);
 
+  // Инициализация карты
   useEffect(() => {
     if (mapInitialized.current) return;
     mapInitialized.current = true;
@@ -495,6 +485,7 @@ const RailwayMap = () => {
         newMap.setType('yandex#map');
         
         setMap(newMap);
+        isMapReady.current = true;
         console.log('Карта успешно создана');
       });
     };
@@ -505,20 +496,177 @@ const RailwayMap = () => {
     document.head.appendChild(script);
   }, [showStatus]);
 
+  // Отрисовка станций
+  useEffect(() => {
+    if (map && allStations.length > 0) {
+      renderStations();
+    }
+  }, [map, allStations, selectedShch, selectedStations, renderStations]);
+
+  // Отрисовка GeoJSON линий
+  useEffect(() => {
+    if (map && geojsonLines.length > 0) {
+      renderGeojsonLines();
+    }
+  }, [map, geojsonLines, showGeojsonFlag, selectedShch, renderGeojsonLines]);
+
+  // Отрисовка отказов и обновление тепловой карты
   useEffect(() => {
     if (map) {
-      renderRailways();
       renderFailures();
+      if (geojsonLines.length > 0 && showGeojsonFlag) {
+        renderGeojsonLines();
+      }
     }
-  }, [map, allStations, csvLines, geojsonLines, autoLines, filteredFailures, selectedShch, selectedStations, showCsvLinesFlag, showGeojsonFlag, showAutoLinesFlag, renderRailways, renderFailures]);
+  }, [map, filteredFailures, renderFailures, renderGeojsonLines, geojsonLines.length, showGeojsonFlag]);
+
+  // Функция фильтрации отказов (исправленная - работа со строками)
+  const applyDateFilter = useCallback(() => {
+    if (failuresData.length === 0) {
+      setFilteredFailures([]);
+      return;
+    }
+
+    let filtered = [...failuresData];
+
+    console.log('=== ПРИМЕНЕНИЕ ФИЛЬТРА ===');
+    console.log('Режим фильтра:', filterMode);
+    console.log('Всего отказов:', failuresData.length);
+
+    switch (filterMode) {
+      case 'single':
+        if (selectedDate) {
+          const selectedYear = selectedDate.getFullYear();
+          const selectedMonth = selectedDate.getMonth() + 1;
+          const selectedDay = selectedDate.getDate();
+          const selectedDateStr = `${selectedDay}.${selectedMonth}.${selectedYear}`;
+          
+          console.log('Фильтр по одному дню:', selectedDateStr);
+          
+          filtered = filtered.filter(failure => {
+            if (!failure.parsedDate) return false;
+            return failure.parsedDate.year === selectedYear &&
+                   failure.parsedDate.month === selectedMonth &&
+                   failure.parsedDate.day === selectedDay;
+          });
+          console.log('Найдено отказов:', filtered.length);
+        }
+        break;
+      
+      case 'range':
+      case 'week':
+      case 'year':
+        if (dateRange.start && dateRange.end) {
+          const startYear = dateRange.start.getFullYear();
+          const startMonth = dateRange.start.getMonth() + 1;
+          const startDay = dateRange.start.getDate();
+          const endYear = dateRange.end.getFullYear();
+          const endMonth = dateRange.end.getMonth() + 1;
+          const endDay = dateRange.end.getDate();
+          
+          const startDateStr = `${startDay}.${startMonth}.${startYear}`;
+          const endDateStr = `${endDay}.${endMonth}.${endYear}`;
+          
+          console.log(`Фильтр по диапазону: ${startDateStr} - ${endDateStr}`);
+          
+          filtered = filtered.filter(failure => {
+            if (!failure.parsedDate) return false;
+            
+            const failureYear = failure.parsedDate.year;
+            const failureMonth = failure.parsedDate.month;
+            const failureDay = failure.parsedDate.day;
+            
+            // Создаем числа для сравнения ГГГГММДД
+            const failureNum = failureYear * 10000 + failureMonth * 100 + failureDay;
+            const startNum = startYear * 10000 + startMonth * 100 + startDay;
+            const endNum = endYear * 10000 + endMonth * 100 + endDay;
+            
+            return failureNum >= startNum && failureNum <= endNum;
+          });
+          console.log('Найдено отказов:', filtered.length);
+        }
+        break;
+      
+      case 'month':
+        if (selectedMonths.length > 0) {
+          console.log('Фильтр по месяцам:', selectedMonths.map(m => `${m.month + 1}/${m.year}`));
+          
+          filtered = filtered.filter(failure => {
+            if (!failure.parsedDate) return false;
+            return selectedMonths.some(month => 
+              failure.parsedDate.year === month.year && 
+              failure.parsedDate.month === month.month + 1 // month хранится 0-11, parsedDate.month 1-12
+            );
+          });
+          console.log('Найдено отказов:', filtered.length);
+        }
+        break;
+      
+      case 'quarter':
+        if (selectedQuarters.length > 0) {
+          console.log('Фильтр по кварталам:', selectedQuarters.map(q => `${q.quarter + 1} кв ${q.year}`));
+          
+          filtered = filtered.filter(failure => {
+            if (!failure.parsedDate) return false;
+            const year = failure.parsedDate.year;
+            const month = failure.parsedDate.month;
+            const quarter = Math.floor((month - 1) / 3);
+            return selectedQuarters.some(q => q.year === year && q.quarter === quarter);
+          });
+          console.log('Найдено отказов:', filtered.length);
+        }
+        break;
+      
+      default:
+        break;
+    }
+
+    // Фильтр по устройствам
+    if (selectedDevices.size > 0) {
+      filtered = filtered.filter(failure => {
+        if (!failure.device || failure.device === 'Не указано') return false;
+        const deviceStr = String(failure.device).toLowerCase();
+        return Array.from(selectedDevices).some(device => 
+          deviceStr.includes(device.toLowerCase())
+        );
+      });
+      console.log(`Фильтр по устройствам (${selectedDevices.size}): ${filtered.length} отказов`);
+    }
+
+    // Фильтр по уровню риска
+    if (selectedRiskLevel) {
+      filtered = filtered.filter(failure => 
+        getRiskLevel(failure.device) === selectedRiskLevel
+      );
+      console.log(`Фильтр по риску (${selectedRiskLevel}): ${filtered.length} отказов`);
+    }
+
+    console.log('=== ФИЛЬТРАЦИЯ ЗАВЕРШЕНА ===');
+    
+    setFilteredFailures(filtered);
+    
+    const countText = filtered.length === 0 ? 'нет отказов' : `${filtered.length} отказов`;
+    showStatus(`📅 ${countText}`, false, 2000);
+  }, [failuresData, filterMode, selectedDate, dateRange, selectedMonths, selectedQuarters, selectedDevices, selectedRiskLevel, getRiskLevel, showStatus]);
+
+  // Применяем фильтр при изменении любых фильтров
+  useEffect(() => {
+    applyDateFilter();
+  }, [applyDateFilter]);
 
   const getWeekDates = (date) => {
-    const startDate = new Date(date);
-    const day = startDate.getDay();
-    const diff = startDate.getDate() - day + (day === 0 ? -6 : 1);
-    startDate.setDate(diff);
+    if (!date) return { startDate: null, endDate: null };
+    
+    const selectedDate = new Date(date);
+    const dayOfWeek = selectedDate.getDay();
+    const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    
+    const startDate = new Date(selectedDate);
+    startDate.setDate(selectedDate.getDate() - diffToMonday);
+    
     const endDate = new Date(startDate);
     endDate.setDate(startDate.getDate() + 6);
+    
     return { startDate, endDate };
   };
 
@@ -526,7 +674,7 @@ const RailwayMap = () => {
     if (failuresData.length === 0) return [];
     const years = new Set();
     failuresData.forEach(f => {
-      if (f.parsedDate) years.add(f.parsedDate.getFullYear());
+      if (f.parsedDate) years.add(f.parsedDate.year);
     });
     return Array.from(years).sort();
   };
@@ -569,94 +717,13 @@ const RailwayMap = () => {
     setSelectedDevices(new Set());
   };
 
-  const applyDateFilter = useCallback(() => {
-    if (failuresData.length === 0) {
-      setFilteredFailures([]);
-      return;
-    }
-
-    let filtered = [...failuresData];
-
-    switch (filterMode) {
-      case 'single':
-        if (selectedDates.length > 0) {
-          const selectedDatesSet = new Set(selectedDates.map(d => d.toDateString()));
-          filtered = filtered.filter(failure => 
-            failure.parsedDate && selectedDatesSet.has(failure.parsedDate.toDateString())
-          );
-        }
-        break;
-      
-      case 'range':
-      case 'week':
-      case 'year':
-        if (dateRange.start && dateRange.end) {
-          filtered = filtered.filter(failure => 
-            failure.parsedDate && failure.parsedDate >= dateRange.start && failure.parsedDate <= dateRange.end
-          );
-        }
-        break;
-      
-      case 'month':
-        if (selectedMonths.length > 0) {
-          filtered = filtered.filter(failure => {
-            if (!failure.parsedDate) return false;
-            return selectedMonths.some(month => 
-              failure.parsedDate.getFullYear() === month.year && 
-              failure.parsedDate.getMonth() === month.month
-            );
-          });
-        }
-        break;
-      
-      case 'quarter':
-        if (selectedQuarters.length > 0) {
-          filtered = filtered.filter(failure => {
-            if (!failure.parsedDate) return false;
-            const year = failure.parsedDate.getFullYear();
-            const month = failure.parsedDate.getMonth();
-            const quarter = Math.floor(month / 3) + 1;
-            return selectedQuarters.some(q => q.year === year && q.quarter === quarter);
-          });
-        }
-        break;
-      
-      default:
-        break;
-    }
-
-    if (selectedDevices.size > 0) {
-      filtered = filtered.filter(failure => {
-        if (!failure.device || failure.device === 'Не указано') return false;
-        const deviceStr = String(failure.device).toLowerCase();
-        return Array.from(selectedDevices).some(device => 
-          deviceStr.includes(device.toLowerCase())
-        );
-      });
-    }
-
-    if (selectedRiskLevel) {
-      filtered = filtered.filter(failure => 
-        getRiskLevel(failure.device) === selectedRiskLevel
-      );
-    }
-
-    setFilteredFailures(filtered);
-    const countText = filtered.length === 0 ? 'нет отказов' : `${filtered.length} отказов`;
-    showStatus(`📅 ${countText}`, false, 2000);
-  }, [failuresData, filterMode, selectedDates, dateRange, selectedMonths, selectedQuarters, selectedDevices, selectedRiskLevel, getRiskLevel, showStatus]);
-
-  useEffect(() => {
-    applyDateFilter();
-  }, [applyDateFilter]);
-
   const handleSingleDateChange = (date) => {
-    setSelectedDates(date ? [date] : []);
+    setSelectedDate(date);
     setFilterMode('single');
   };
 
   const handleRangeChange = (dates) => {
-    const [start, end] = dates;
+    const [start, end] = dates || [null, null];
     setDateRange({ start, end });
     setFilterMode('range');
   };
@@ -670,24 +737,44 @@ const RailwayMap = () => {
   };
 
   const handleYearSelect = (year) => {
-    const startDate = new Date(year, 0, 1);
-    const endDate = new Date(year, 11, 31);
-    setDateRange({ start: startDate, end: endDate });
-    setFilterMode('year');
+    if (year) {
+      const startDate = new Date(year, 0, 1);
+      const endDate = new Date(year, 11, 31);
+      setDateRange({ start: startDate, end: endDate });
+      setFilterMode('year');
+    }
   };
 
   const handleAllTimeSelect = () => {
     if (failuresData.length > 0) {
-      const dates = failuresData.map(f => f.parsedDate).filter(d => d);
-      const minDate = new Date(Math.min(...dates));
-      const maxDate = new Date(Math.max(...dates));
-      setDateRange({ start: minDate, end: maxDate });
+      let minYear = Infinity, maxYear = -Infinity;
+      let minMonth = 12, maxMonth = 1;
+      let minDay = 31, maxDay = 1;
+      
+      failuresData.forEach(f => {
+        if (f.parsedDate) {
+          if (f.parsedDate.year < minYear) {
+            minYear = f.parsedDate.year;
+            minMonth = f.parsedDate.month;
+            minDay = f.parsedDate.day;
+          }
+          if (f.parsedDate.year > maxYear) {
+            maxYear = f.parsedDate.year;
+            maxMonth = f.parsedDate.month;
+            maxDay = f.parsedDate.day;
+          }
+        }
+      });
+      
+      const startDate = new Date(minYear, minMonth - 1, minDay);
+      const endDate = new Date(maxYear, maxMonth - 1, maxDay);
+      setDateRange({ start: startDate, end: endDate });
       setFilterMode('range');
     }
   };
 
   const clearDateFilter = () => {
-    setSelectedDates([]);
+    setSelectedDate(null);
     setDateRange({ start: null, end: null });
     setSelectedMonths([]);
     setSelectedQuarters([]);
@@ -716,6 +803,8 @@ const RailwayMap = () => {
           const devicesSet = new Set();
           const data = results.data;
           
+          console.log('Загружено строк из CSV:', data.length);
+          
           data.forEach((row, idx) => {
             let dateTime = row['Дата, время'] || row['Дата'] || '';
             let station = row['Станция'] || '';
@@ -732,24 +821,15 @@ const RailwayMap = () => {
               });
             }
             
-            let parsedDate = null;
-            let dateStr = '';
-            
-            if (dateTime) {
-              const datePart = String(dateTime).split(' ')[0];
-              dateStr = datePart;
-              const match = datePart.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
-              if (match) {
-                parsedDate = new Date(match[3], match[2] - 1, match[1]);
-              }
-            }
+            const parsedDate = parseDateFromCSV(dateTime);
             
             let parsedLat = lat ? parseFloat(String(lat).replace(',', '.')) : null;
             let parsedLng = lng ? parseFloat(String(lng).replace(',', '.')) : null;
             
             if (station && parsedDate) {
               failures.push({
-                date: dateStr,
+                originalDateStr: String(dateTime),
+                dateStr: parsedDate.dateStr,
                 parsedDate: parsedDate,
                 station: String(station).trim(),
                 device: String(device || ''),
@@ -760,10 +840,19 @@ const RailwayMap = () => {
               });
             }
             
-            if (idx % 500 === 0) {
+            if (idx % 1000 === 0) {
               showProgress(true, (idx / data.length) * 100);
             }
           });
+          
+          console.log(`Загружено отказов: ${failures.length}`);
+          
+          // Выводим примеры дат для проверки
+          const dateExample = failures.slice(0, 5).map(f => ({
+            original: f.originalDateStr,
+            parsed: `${f.parsedDate.day}.${f.parsedDate.month}.${f.parsedDate.year}`
+          }));
+          console.log('Примеры дат:', dateExample);
           
           setFailuresData(failures);
           setAvailableDevices(Array.from(devicesSet).sort());
@@ -775,67 +864,132 @@ const RailwayMap = () => {
           showProgress(false);
           showStatus(`❌ Ошибка: ${err.message}`, true);
         }
+      },
+      error: (err) => {
+        console.error('Ошибка парсинга:', err);
+        showProgress(false);
+        showStatus(`❌ Ошибка при парсинге файла`, true);
       }
     });
   };
 
-  const generateAutoLines = useCallback(() => {
-    if (allStations.length === 0) {
-      showStatus('⚠️ Сначала загрузите файл со станциями!', true);
-      return;
-    }
+  const handleGeojsonFile = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
 
-    showStatus('🔄 Генерация автоматических линий...');
+    showStatus(`🔄 Загрузка ${file.name}...`);
     showProgress(true, 0);
 
-    setTimeout(() => {
-      const newAutoLines = [];
-      const stationsByShch = new Map();
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = JSON.parse(evt.target.result);
+        const newGeojsonLines = [];
 
-      allStations.forEach(station => {
-        if (!stationsByShch.has(station.shch)) {
-          stationsByShch.set(station.shch, []);
-        }
-        stationsByShch.get(station.shch).push(station);
-      });
+        const processCoordinates = (coords) => {
+          if (!coords || coords.length === 0) return null;
+          let isLngLat = false;
+          if (coords.length > 0 && Math.abs(coords[0][0]) <= 180 && Math.abs(coords[0][1]) <= 90) {
+            isLngLat = true;
+          }
+          const result = coords.map(coord => {
+            const lat = isLngLat ? coord[1] : coord[0];
+            const lng = isLngLat ? coord[0] : coord[1];
+            return isPointInRegion(lat, lng) ? [lat, lng] : null;
+          }).filter(p => p !== null);
+          
+          return result.length >= 2 ? result : null;
+        };
 
-      let processed = 0;
-      const total = stationsByShch.size;
-
-      for (const [shch, stations] of stationsByShch.entries()) {
-        if (stations.length < 2) {
-          processed++;
-          showProgress(true, (processed / total) * 100);
-          continue;
-        }
-
-        const color = getColorForShch(shch);
-        stations.sort((a, b) => {
-          const centerLat = (REGION_BOUNDS.minLat + REGION_BOUNDS.maxLat) / 2;
-          const centerLng = (REGION_BOUNDS.minLng + REGION_BOUNDS.maxLng) / 2;
-          return Math.abs(a.lat - centerLat) + Math.abs(a.lng - centerLng) - 
-                 (Math.abs(b.lat - centerLat) + Math.abs(b.lng - centerLng));
-        });
-
-        for (let i = 0; i < stations.length - 1; i++) {
-          newAutoLines.push({
-            id: `${shch}_${i}`,
-            shch: shch,
-            points: [[stations[i].lat, stations[i].lng], [stations[i + 1].lat, stations[i + 1].lng]],
-            color: color,
-            stations: [stations[i].name, stations[i + 1].name]
+        if (data.type === 'FeatureCollection') {
+          data.features.forEach(feature => {
+            if (feature.geometry && feature.geometry.type === 'LineString') {
+              const points = processCoordinates(feature.geometry.coordinates);
+              if (points && points.length >= 2) {
+                newGeojsonLines.push({
+                  id: feature.properties?.id || feature.properties?.name,
+                  points: points,
+                  color: '#3b82f6',
+                  shch: feature.properties?.shch || 'GeoJSON'
+                });
+              }
+            }
           });
         }
 
-        processed++;
-        showProgress(true, (processed / total) * 100);
+        setGeojsonLines(newGeojsonLines);
+        showProgress(false);
+        showStatus(`✅ Загружено GeoJSON линий: ${newGeojsonLines.length}`);
+      } catch (err) {
+        showProgress(false);
+        showStatus(`❌ Ошибка: ${err.message}`, true);
       }
+    };
+    reader.readAsText(file);
+  };
 
-      setAutoLines(newAutoLines);
-      showProgress(false);
-      showStatus(`✅ Сгенерировано авто-линий: ${newAutoLines.length}`);
-    }, 100);
-  }, [allStations, getColorForShch, showStatus, showProgress]);
+  const handleStationsFile = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    showStatus(`📂 Загрузка ${file.name}...`);
+    showProgress(true, 10);
+
+    Papa.parse(file, {
+      header: true,
+      encoding: "UTF-8",
+      skipEmptyLines: true,
+      dynamicTyping: true,
+      complete: (results) => {
+        try {
+          const stations = [];
+          const data = results.data;
+
+          data.forEach((row, idx) => {
+            let lat = row.Широта || row.lat || row.Latitude;
+            let lng = row.Долгота || row.lon || row.Longitude;
+            let name = row.Станция || row.name || row.station;
+            let shch = row.ШЧ || row.branch || 'Неизвестно';
+
+            if (lat && lng && !isNaN(lat) && !isNaN(lng) && name && isPointInRegion(lat, lng)) {
+              stations.push({ name: String(name), lat, lng, shch: String(shch) });
+            }
+
+            if (idx % 100 === 0) {
+              showProgress(true, 10 + (idx / data.length) * 80);
+            }
+          });
+
+          setAllStations(stations);
+          showProgress(false);
+          showStatus(`✅ Загружено станций: ${stations.length}`, false, 3000);
+        } catch (err) {
+          showProgress(false);
+          showStatus(`❌ Ошибка: ${err.message}`, true);
+        }
+      }
+    });
+  };
+
+  const switchMapLayer = (type) => {
+    if (!map) return;
+    map.setType(type === 'scheme' ? 'yandex#map' : 'yandex#satellite');
+    setCurrentMapType(type);
+  };
+
+  const resetView = () => {
+    if (!map) return;
+    map.setBounds([
+      [REGION_BOUNDS.minLat, REGION_BOUNDS.minLng],
+      [REGION_BOUNDS.maxLat, REGION_BOUNDS.maxLng]
+    ], { checkZoomRange: true });
+    showStatus('🗺️ Вид установлен на регион ЗСЖД');
+  };
+
+  const selectAllShch = () => setSelectedShch(new Set(allStations.map(s => s.shch)));
+  const clearAllShch = () => setSelectedShch(new Set());
+  const selectAllStations = () => setSelectedStations(new Set(allStations.map(s => s.name)));
+  const clearAllStations = () => setSelectedStations(new Set());
 
   const updateFilterPanel = useCallback(() => {
     const shchSet = new Set();
@@ -899,201 +1053,12 @@ const RailwayMap = () => {
     updateFilterPanel();
   }, [allStations, selectedShch, selectedStations, stationSearch, updateFilterPanel]);
 
-  const handleStationsFile = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    showStatus(`📂 Загрузка ${file.name}...`);
-    showProgress(true, 10);
-
-    Papa.parse(file, {
-      header: true,
-      encoding: "UTF-8",
-      skipEmptyLines: true,
-      dynamicTyping: true,
-      complete: (results) => {
-        try {
-          const stations = [];
-          const data = results.data;
-
-          data.forEach((row, idx) => {
-            let lat = row.Широта || row.lat || row.Latitude;
-            let lng = row.Долгота || row.lon || row.Longitude;
-            let name = row.Станция || row.name || row.station;
-            let shch = row.ШЧ || row.branch || 'Неизвестно';
-
-            if (lat && lng && !isNaN(lat) && !isNaN(lng) && name && isPointInRegion(lat, lng)) {
-              stations.push({ name: String(name), lat, lng, shch: String(shch) });
-            }
-
-            if (idx % 100 === 0) {
-              showProgress(true, 10 + (idx / data.length) * 80);
-            }
-          });
-
-          setAllStations(stations);
-          showProgress(false);
-          showStatus(`✅ Загружено станций: ${stations.length}`, false, 3000);
-        } catch (err) {
-          showProgress(false);
-          showStatus(`❌ Ошибка: ${err.message}`, true);
-        }
-      }
-    });
-  };
-
-  const handleRoutesFile = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    showStatus(`🔄 Обработка ${file.name}...`);
-    showProgress(true, 0);
-
-    const linesMap = new Map();
-    let processedRows = 0;
-
-    Papa.parse(file, {
-      header: true,
-      encoding: "UTF-8",
-      skipEmptyLines: true,
-      dynamicTyping: true,
-      step: (results) => {
-        const row = results.data;
-        processedRows++;
-
-        if (processedRows % 10000 === 0) {
-          showProgress(true, Math.min((processedRows / 240000) * 100, 90));
-        }
-
-        let lineId = row.line_id || row.lineId || row.LINE_ID;
-        let order = row.point_ordlon || row.order || 0;
-        let lat = row.lat || row.Latitude;
-        let lng = row.lon || row.Longitude;
-        let shch = row.branch || row.ШЧ;
-
-        if (row.geopoint && !lat) {
-          try {
-            const coords = JSON.parse(row.geopoint);
-            if (Array.isArray(coords) && coords.length === 2) {
-              lat = coords[0];
-              lng = coords[1];
-            }
-          } catch(e) {}
-        }
-
-        if (lineId && lat && lng && !isNaN(lat) && !isNaN(lng) && isPointInRegion(lat, lng)) {
-          if (!linesMap.has(lineId)) {
-            linesMap.set(lineId, []);
-          }
-          linesMap.get(lineId).push({ order: order || 0, lat, lng, shch });
-        }
-      },
-      complete: () => {
-        const newCsvLines = [];
-
-        for (const [lineId, points] of linesMap.entries()) {
-          points.sort((a, b) => a.order - b.order);
-          if (points.length >= 2) {
-            const latLngs = points.map(p => [p.lat, p.lng]);
-            const shch = points[0]?.shch || 'Неизвестно';
-            const color = getColorForShch(shch);
-
-            newCsvLines.push({
-              id: lineId,
-              shch: shch,
-              points: latLngs,
-              color: color
-            });
-          }
-        }
-
-        setCsvLines(newCsvLines);
-        showProgress(false);
-        showStatus(`✅ Загружено линий: ${newCsvLines.length}`);
-      }
-    });
-  };
-
-  const handleGeojsonFile = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    showStatus(`🔄 Загрузка ${file.name}...`);
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const data = JSON.parse(evt.target.result);
-        const newGeojsonLines = [];
-
-        const processCoordinates = (coords) => {
-          if (!coords || coords.length === 0) return null;
-          let isLngLat = false;
-          if (coords.length > 0 && Math.abs(coords[0][0]) <= 180 && Math.abs(coords[0][1]) <= 90) {
-            isLngLat = true;
-          }
-          const result = coords.map(coord => {
-            const lat = isLngLat ? coord[1] : coord[0];
-            const lng = isLngLat ? coord[0] : coord[1];
-            return isPointInRegion(lat, lng) ? [lat, lng] : null;
-          }).filter(p => p !== null);
-          
-          return result.length >= 2 ? result : null;
-        };
-
-        if (data.type === 'FeatureCollection') {
-          data.features.forEach(feature => {
-            if (feature.geometry && feature.geometry.type === 'LineString') {
-              const points = processCoordinates(feature.geometry.coordinates);
-              if (points && points.length >= 2) {
-                newGeojsonLines.push({
-                  id: feature.properties?.id || feature.properties?.name,
-                  points: points,
-                  color: '#3b82f6',
-                  shch: feature.properties?.shch || 'GeoJSON'
-                });
-              }
-            }
-          });
-        }
-
-        setGeojsonLines(newGeojsonLines);
-        showStatus(`✅ Загружено GeoJSON линий: ${newGeojsonLines.length}`);
-      } catch (err) {
-        showStatus(`❌ Ошибка: ${err.message}`, true);
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  const switchMapLayer = (type) => {
-    if (!map) return;
-    map.setType(type === 'scheme' ? 'yandex#map' : 'yandex#satellite');
-    setCurrentMapType(type);
-  };
-
-  const resetView = () => {
-    if (!map) return;
-    map.setBounds([
-      [REGION_BOUNDS.minLat, REGION_BOUNDS.minLng],
-      [REGION_BOUNDS.maxLat, REGION_BOUNDS.maxLng]
-    ], { checkZoomRange: true });
-    showStatus('🗺️ Вид установлен на регион ЗСЖД');
-  };
-
-  const selectAllShch = () => setSelectedShch(new Set(allStations.map(s => s.shch)));
-  const clearAllShch = () => setSelectedShch(new Set());
-  const selectAllStations = () => setSelectedStations(new Set(allStations.map(s => s.name)));
-  const clearAllStations = () => setSelectedStations(new Set());
-
   const stats = useMemo(() => ({
     stations: allStations.length,
-    csvLines: csvLines.length,
     geojsonLines: geojsonLines.length,
-    autoLines: autoLines.length,
     failures: failuresData.length,
     devices: availableDevices.length
-  }), [allStations.length, csvLines.length, geojsonLines.length, autoLines.length, failuresData.length, availableDevices.length]);
+  }), [allStations.length, geojsonLines.length, failuresData.length, availableDevices.length]);
 
   return (
     <div className="railway-map">
@@ -1105,10 +1070,6 @@ const RailwayMap = () => {
           <label className="railway-map__file-label">
             <i className="fas fa-database"></i> stations.csv
             <input type="file" accept=".csv" onChange={handleStationsFile} />
-          </label>
-          <label className="railway-map__file-label">
-            <i className="fas fa-road"></i> routes_points.csv
-            <input type="file" accept=".csv" onChange={handleRoutesFile} />
           </label>
           <label className="railway-map__file-label">
             <i className="fas fa-map"></i> Puti-2.geojson
@@ -1123,9 +1084,6 @@ const RailwayMap = () => {
             <button className={currentMapType === 'scheme' ? 'active' : ''} onClick={() => switchMapLayer('scheme')}>Схема</button>
             <button className={currentMapType === 'satellite' ? 'active' : ''} onClick={() => switchMapLayer('satellite')}>Спутник</button>
           </div>
-          <button onClick={generateAutoLines} className="railway-map__action-button">
-            <i className="fas fa-magic"></i> Авто-прорисовка
-          </button>
           <button onClick={() => setShowFilterPanel(!showFilterPanel)}>
             <i className="fas fa-filter"></i> Фильтры
           </button>
@@ -1135,9 +1093,7 @@ const RailwayMap = () => {
         </div>
         <div className="railway-map__legend">
           <span><i className="railway-map__station-marker"></i> Станции</span>
-          <span><i className="railway-map__line-color csv"></i> Пути (CSV)</span>
           <span><i className="railway-map__line-color geojson"></i> GeoJSON пути (тепловая карта)</span>
-          <span><i className="railway-map__line-color auto"></i> Авто-линии</span>
           <span><i className="railway-map__failure-marker-critical"></i> Критический</span>
           <span><i className="railway-map__failure-marker-high"></i> Высокий</span>
           <span><i className="railway-map__failure-marker-medium"></i> Средний</span>
@@ -1163,7 +1119,7 @@ const RailwayMap = () => {
           {filterMode === 'single' && (
             <div className="railway-map__date-single">
               <DatePicker
-                selected={selectedDates[0] || null}
+                selected={selectedDate}
                 onChange={handleSingleDateChange}
                 dateFormat="dd.MM.yyyy"
                 placeholderText="Выберите дату"
@@ -1269,9 +1225,9 @@ const RailwayMap = () => {
                     <div key={year} className="railway-map__year-group">
                       <div className="railway-map__year-title">{year}</div>
                       <div className="railway-map__quarters-row">
-                        {[1,2,3,4].map(quarter => {
+                        {[0,1,2,3].map(quarter => {
                           const isSelected = selectedQuarters.some(q => q.year === year && q.quarter === quarter);
-                          const quarterNames = {1:'I',2:'II',3:'III',4:'IV'};
+                          const quarterNames = {0:'I',1:'II',2:'III',3:'IV'};
                           return (
                             <button key={`${year}-${quarter}`} className={`railway-map__quarter-btn ${isSelected ? 'active' : ''}`} onClick={() => toggleQuarter(year, quarter)}>
                               {quarterNames[quarter]} квартал
@@ -1371,7 +1327,7 @@ const RailwayMap = () => {
                 <div className="station-info-grid">
                   <div><strong>📍 Участок:</strong> {selectedStationDetails.shch}</div>
                   <div><strong>📊 Всего отказов:</strong> {stationFailuresHistory.length}</div>
-                  <div><strong>📅 Период:</strong> {stationFailuresHistory.length > 0 ? `${stationFailuresHistory[stationFailuresHistory.length-1]?.date} - ${stationFailuresHistory[0]?.date}` : 'Нет данных'}</div>
+                  <div><strong>📅 Период:</strong> {stationFailuresHistory.length > 0 ? `${stationFailuresHistory[stationFailuresHistory.length-1]?.dateStr} - ${stationFailuresHistory[0]?.dateStr}` : 'Нет данных'}</div>
                   <div><strong>🔄 Уникальных устройств:</strong> {new Set(stationFailuresHistory.map(f => f.device).filter(d => d)).size}</div>
                 </div>
               </div>
@@ -1391,7 +1347,7 @@ const RailwayMap = () => {
                     <tbody>
                       {stationFailuresHistory.map((f, i) => (
                         <tr key={i}>
-                          <td>{f.date}</td>
+                          <td>{f.dateStr}</td>
                           <td title={f.device}>{f.device?.substring(0, 50) || '-'}{f.device?.length > 50 ? '...' : ''}</td>
                           <td>{f.department || '-'}</td>
                           <td>{f.duration || '-'}</td>
@@ -1424,9 +1380,7 @@ const RailwayMap = () => {
           </div>
           <div className="railway-map__filter-section">
             <h4>Тип линий</h4>
-            <label><input type="checkbox" checked={showCsvLinesFlag} onChange={(e) => setShowCsvLinesFlag(e.target.checked)} /> Показать пути из CSV</label>
             <label><input type="checkbox" checked={showGeojsonFlag} onChange={(e) => setShowGeojsonFlag(e.target.checked)} /> Показать пути из GeoJSON (с тепловой картой)</label>
-            <label><input type="checkbox" checked={showAutoLinesFlag} onChange={(e) => setShowAutoLinesFlag(e.target.checked)} /> Показать автоматические линии</label>
           </div>
         </div>
       )}
@@ -1434,9 +1388,7 @@ const RailwayMap = () => {
       <div className={`railway-map__status-panel ${status.isError ? 'error' : 'success'}`}>{status.message}</div>
       <div className="railway-map__stats">
         📍 Станции: {stats.stations}<br />
-        🛤️ Треки (CSV): {stats.csvLines}<br />
         🗺️ GeoJSON: {stats.geojsonLines}<br />
-        🔗 Авто-линии: {stats.autoLines}<br />
         ⚠️ Отказы: {stats.failures}<br />
         🔧 Устройств: {stats.devices}
       </div>
